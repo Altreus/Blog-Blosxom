@@ -214,10 +214,11 @@ sub template {
         my $fn = File::Spec->catfile($self->{datadir}, $path, "$comp.$flavour");
 
         while (1) {
-            # Return the contents of this template if the file exists
+            # Return the contents of this template if the file exists. If it is empty,
+            # we have defaults set up.
             if (-e $fn) {
                 open my $fh, "<", $fn;
-                return join '', <$fh>;
+                $template = join '', <$fh>;
             }
 
             # Stop looking when there is no $path to go between datadir and the
@@ -233,12 +234,98 @@ sub template {
     }
 
     $template ||= $self->{template}{$flavour}{$comp} || $self->{template}{error}{$comp};
-
 }
+
+=head2 entries_for_path
+
+Given a path, find the entries that should be returned. This may be overridden
+by a plugin defining the function "entries", or this "entries_for_path" function.
+They are synonymous. See L<PLUGINS> for information on overriding this method.
+
+This implements two behaviours. If the path requested is a real path then it is
+searched for all blog entries, honouring the depth parameter that limits how far
+below the data_dir we should look for blog entries.
+
+If it is not then it is expected to be a date, being in 1, 2 or 3 parts, in one
+true date ISO format. This version will return all entries filtered by this date
+specification. See also L<date_of_post>, which determines the date on which the
+post was made and can be overridden in plugins.
+
+=cut
 
 sub entries_for_path {
     my ($self, $path) = @_;
+    
+    my @entries;
 
+    return @entries if @entries = $self->_check_plugins('entries', @_);
+
+    my $filter = $self->filter_for_path($path);
+    my $abs_path = File::Spec->catdir( $self->{datadir}, $path );
+
+    if (-d $abs_path) {
+        # We use File::Find on a real path
+        my $find = sub {
+            return unless -f;
+
+            my $rel_path = File::Spec->abs2rel( $File::Find::dir, $abs_path );
+            my $curdepth = File::Spec->splitpath($rel_path);
+
+            my $fex = $self->{file_extension};
+
+            # not specifying a file extension is a bit silly.
+            if (!$fex || /\.$fex/) {
+                my $rel_file = File::Spec->catfile( $rel_path, $_ );
+                my $date = $self->date_of_post($File::Find::file);
+                my $file_info = { date => $date };
+
+                if ($self->filter($rel_file, $file_info)) {
+                    push @entries, [$rel_file, $file_info ];
+                }
+            }
+
+            $File::Find::prune = ($self->{depth} && $curdepth > $self->{depth});
+        };
+
+        File::Find( $find, $abs_path );
+    }
+    else {
+        # We use date stuff on a fake path.
+        # TODO: see whether we can split the path into a date section and a real section.
+        my @ymd = File::Spec->splitpath( $path );
+        my @all_entries = $self->entries_for_path( "" );
+
+        for( @all_entries ) {
+            if (                   $ymd[0] == $_[1]->{date}->[0]
+            && (!exists $ymd[1] or $ymd[1] == $_[1]->{date}->[1])
+            && (!exists $ymd[2] or $ymd[2] == $_[1]->{date}->[2])) {
+                push @entries, $_;
+            }
+        }
+    }
+
+    return @entries;
+}
+
+=head2 filter_for_path
+
+The filter is a subref that is provided with the file and whatever hashref
+is created for the file by entries_for_path. The default is that the
+hashref only contains the date of the file.
+
+This can be overridden by plugins in order to alter the way the module filters
+the files. See L<PLUGINS> for more details.
+
+=cut
+
+sub filter {
+    my ($self, $post, $file_info) = @_;
+
+    if (my $filter = $self->_check_plugins('filter', @_)) {
+        return $filter;
+    }
+
+    return sub{1};
 }
 
 =head2 static_mode($password, $on)
@@ -287,6 +374,8 @@ sub _load_plugins {
                     sort readdir $plugins) {
         # blosxom docs say you can order modules by prefixing numbers.
         $plugin =~ s/^\d+//;
+
+        # This will blow up if your package name is not the same as your file name.
         require "$plugin_dir/$plugin";
         if ($plugin->start()) {
             $self->{active_plugins}->{$plugin_name} = 1;
@@ -317,7 +406,7 @@ sub _load_templates {
 
 ## _check_plugins
 #  Look for plugins that can do the first arg, and pass them the rest of the args.
-#  Return the first plugin that returns a value.
+#  Return the first value returned by a plugin.
 
 sub _check_plugins {
     my ($self, $method, @underscore) = @_;
@@ -330,16 +419,168 @@ sub _check_plugins {
     }
 }
 
+=head1 PLUGINS
+
+Writing plugins for this new version of Blosxom is easy. If you know exactly
+what you want from your plugin, you can simply subclass this one and override
+the methods below. Alternatively, you can create files in some directory, and
+then configure your Blosxom object to use that directory as your plugins
+directory.
+
+In order to use a plugin directory, the package name in the plugin file must
+be identical to the filename itself. That is because the blosxom engine uses
+the filename to know which package to give to C<require>. The only thing that
+deviates from this rule is that you can prepend the filename with any number of
+digits, and these will be used to load the plugins in numerical order.
+
+In order to disable a plugin, therefore, you can rename it to something other
+than the package name. Traditionally, adding an underscore to the filename is
+the way you turn it off. Alternatively you could edit the file itself and
+make the C<start> function return 0 instead of 1.
+
+=head2 Starting a plugin
+
+As mentioned, it is necessary that your plugin's filename is the same as the
+package defined in the plugin. Please also include a bit of a comment about
+what your plugin does, plus author information. The community would appreciate
+it if you would use an open licence for your copyrighting, since the community
+is built on this attitude. However, the licence you use is, of course, up to 
+you.
+
+The smallest possible plugin (comments aside) is shown below, and its filename
+would be C<myplugin>.
+
+  ## Blosxom plugin myplugin
+  ## Makes blosxom not suck
+  ## Author: Altreus
+  ## Licence: X11/MIT
+
+  package myplugin;
+
+  sub start{1}
+
+  1;
+
+=head2 Hooks
+
+Every single hook in the plugin will be passed the I<Blosxom> object as the
+first argument, effectively running the function as a method on the object
+itself. This $self will therefore not be mentioned in the following 
+explanations; only any extra parameters will be described.
+
+In all cases, the first plugin that defines a hook is the one that gets to do
+it. For this reason you may find that you want to use the method above to
+decide the order in which the plugins are loaded.
+
+Also in all cases, except where a true/false value is expected, simply not
+returning anything is the way to go about deciding you don't want to alter the
+default behaviour. For example, if you wanted to take the date of a post from
+the filename, then in the cases where the filename does not define a date, you
+can simply C<return;> and processing will continue as if it had not defined 
+this functionality in the first place.
+
+=head3 start
+
+The C<start> subroutine is required in your module and will return either a
+true or a false value to decide whether the plugin should be used.
+
+You can use the values on the Blosxom object if you need to make a decision.
+
+  sub start {
+      return shift->{static_mode}; # Only active in static mode
+  }
+
+=head3 template ($path, $comp, $flavour)
+
+This returns the template to use in the given path for the given component for
+the given flavour. The requested filename will not be part of the path.
+
+The default template procedure is to check the given path and all parent
+directories of that path, up to the blog root, for the file $comp.$flavour,
+and to use the first one found.
+
+Since it is pretty easy to find this file based on just the filename, you'd
+think this method has something a bit more difficult to do. In fact this 
+function returns the I<content> of that file, ready for interpolation.
+
+This function implements the functionality of both the C<template> hook in the
+original blosxom script, as well as the hooks for the individual templates
+themselves. That means that if your original plugin defined a new template for,
+e.g., the date.html in certain situations, this is where you should now return
+that magic HTML.
+
+=head3 entries_for_path ($path)
+
+You can also just call this function C<entries>.
+
+This returns an array of items. Each item is itself an arrayref, whose first
+entry is the filename and whose second entry is a hashref. The hashref is
+required to contain the 'date' key, which specifies the date of the file. That
+is, the function returns:
+
+    @(
+        [
+            filename,
+            {
+                date => [ year, month, day ],
+                ...
+            }
+        ],
+        ...
+    )
+
+Obviously this is not real Perl syntax, but it is similar, and should get the
+point across. The arrayref may contain other things in the third and subsequent
+positions, and the hashref may contain other keys, but this much is required.
+
+The filename returned is the path and filename of the entry file relative to
+the datadir. The input $path is not necessarily relative to anything, because
+it will be the path of the HTTP request. Thus, please note, it may contain the
+year, month and day of the requested post(s) and not a path to any real file or
+directory at all.
+
+It is worth noting that you can override how Blosxom decides the date of the
+file by implementing the date_of_post method instead of this one.
+
+=head3 filter ($post)
+
+This function is empty by default (rather, it returns true by default) and is
+a hook by which you can scrupulously filter out posts one way or another. You
+are provided with the full path to the post, relative to C<< $self->{datadir} >>,
+including its filename. You should return a true value if you want this post to
+be included in the posts shown on the page, and false if you want it to be
+omitted.
+
+B<Please note:> This method, and hence its plugins, are called from the
+C<entries_for_path> method. If you write a plugin that overrides I<that>, you
+should make very sure that that method calls this one at some point before it
+adds the entry to the returned array. Otherwise, your filters will never be
+applied.
+
+=head3 date_of_post ($post)
+
+The post provided will be the filename and path to the post, relative to the
+root of the blog directory, C<< $self->{datadir} >>. You should return an
+arrayref where [0] is the 4-digit year, [1] is the 2-digit month, and [2] is
+the 2-digit day. This is not checked for validity but will probably cause 
+something to blow up somewhere if it is not a real date.
+
 =head1 AUTHOR
 
 Altreus, C<< <altreus at perl.org> >>
 
 =head1 TODO
 
-Currently the backward-compatibility of plugins is not implemented. However, if any
-instance of $blosxom::variable is replaced with $blosxom->{variable} it should work.
-That is because the blog object is passed through to the functions as the first argument
-after the $self that is the plugin object.
+Most existing plugins won't work because I've changed the way it works to the
+extent that the same functions don't necessarily exist. However, existing
+plugins should be fairly easy to tailor to the new plugin system. I didn't
+think this was too important a feature because a good number of the plugins at
+the blosxom plugin repository are 404s anyway.
+
+The plugin system is like the original blosxom's, where the first plugin to
+define a function is the boss of that function. Some functions may benefit
+from the combined effort of all plugins, such as filtering. That is something
+to think about in the future.
 
 =head1 BUGS
 
