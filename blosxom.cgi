@@ -242,7 +242,7 @@ if (!$ENV{GATEWAY_INTERFACE} and param('-password') and $static_password and par
       foreach $flavour ( @static_flavours ) {
         my $content_type = (&$template($p,'content_type',$flavour));
         $content_type =~ s!\n.*!!s;
-        my $fn = $p =~ m!^(.+)\.$file_extension$! ? $1 : "$p/index";
+        my $fn = $p =~ m/^(.+)\.$file_extension$/ ? $1 : "$p/index";
         param('-quiet') or print "$fn.$flavour\n";
         my $fh_w = new FileHandle "> $static_dir/$fn.$flavour" or die "Couldn't open $static_dir/$p for writing: $!";  
         $output = '';
