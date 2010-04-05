@@ -832,6 +832,9 @@ define a function is the boss of that function. Some functions may benefit
 from the combined effort of all plugins, such as filtering. That is something
 to think about in the future.
 
+Static rendering is not yet implemented. Frankly I don't think I can be 
+bothered.
+
 =head1 BUGS
 
 Please report any bugs or feature requests to C<bug-blog-blosxom at rt.cpan.org>, or through
@@ -873,6 +876,10 @@ L<http://search.cpan.org/dist/Blog-Blosxom/>
 
 =head1 ACKNOWLEDGEMENTS
 
+Thanks to the original author of blosxom.cgi for writing it and giving me code
+to do much of the stuff it did.
+
+http://blosxom.com
 
 =head1 LICENSE AND COPYRIGHT
 
