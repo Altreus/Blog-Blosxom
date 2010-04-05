@@ -238,6 +238,9 @@ sub run {
 
     if (-f $path . "." . $self->{file_extension}) $self->{single_entry} = 1;
 
+    $self->{path_info} = $path;
+    $self->{flavour} = $flavour;
+
     # Build an index page for the path
     my @entries = $self->entries_for_path($path);
     @entries = $self->filter(@entries);
@@ -254,7 +257,7 @@ sub run {
         # TODO: Here is an opportunity to style the entries in the style
         # of the subdir they came from.
         if ($date != ($date = $entry->[1]->{date})) {
-            push @templates, $self->interpolate($self->template($path, "date", $flavour), $date);
+            push @templates, $self->interpolate($self->template($path, "date", $flavour), {date=>$date} );
         }
 
         my $entry_data = $self->entry_data($entry);
@@ -265,6 +268,8 @@ sub run {
     # A skip plugin will stop processing just before anything is output.
     # Not sure why.
     return if $self->_check_plugins('skip');
+
+    return join "\n", @templates;
 }
 
 =head2 template($path, $component, $flavour)
@@ -338,7 +343,7 @@ sub entries_for_path {
         my $find = sub {
             return unless -f;
 
-            my $rel_path = File::Spec->abs2rel( $File::Find::dir, $abs_path );
+            my $rel_path = File::Spec->abs2rel( $File::Find::dir, $self->{datadir} );
             my $curdepth = File::Spec->splitpath($rel_path);
 
             my $fex = $self->{file_extension};
@@ -373,6 +378,22 @@ sub entries_for_path {
     }
 
     return @entries;
+}
+
+=head2 date_of_post ($fn)
+
+Return a unix timestamp defining the date of the post. The filename provided to
+the method is an absolute filename.
+
+=cut
+
+sub date_of_post {
+    my ($self, $fn) = @_;
+
+    my $dop;
+    return $dop if $dop = $self->_check_plugins("date_of_post", @_);
+
+    return stat($fn)->mtime;
 }
 
 =head2 filter
@@ -421,6 +442,126 @@ sub static_mode {
     if ($on && $password eq $self->{static_password}) {
         $self->{static_mode} = 1;
         $blosxom::static_or_dynamic = 'static';
+    }
+}
+
+=head2 interpolate($template, $extra_data) 
+
+Each template is interpolated, which means that variables are swapped out if
+they exist. Each template may have template-specific variables; e.g. the story
+template has a title and a body. Those are provided in the extra data, which is
+a hashref with the variable name to be replaced (without the $) as the key, and
+the corresponding value as the value.
+
+This method can be overridden by a plugin.
+
+=cut
+
+sub interpolate {
+    my ($self, $template, $extra_data) = @_;
+ 
+    my $done;
+    return $done if $done = $self->_check_plugins("interpolate", @_);
+
+    for my $var (keys %$extra_data){
+        $template =~ s/\$$var\b/$extra_data->{$var}/g;
+    }
+
+    # The blosxom docs say these are global vars, so let's mimic that.
+    for my $var (qw(blog_title blog_description blog_language url path_info flavour)) {
+        $template =~ s/\$$var\b/$self->{$var}/g;
+    }
+
+    # I couldn't think of a better way. I don't think there are any blosxom::
+    # namespace vars that need to be exposed to templates, but other plugins
+    # may make some.
+    $template =~ s/(\$\w+(?:::)?\w*)/"defined $1 ? $1 : ''"/gee;
+    return $template;
+}
+
+=head2 entry_data ($entry) 
+
+Returns a hashref containing the following keys:
+
+=over
+
+=item title
+
+Post title
+
+=item body
+
+The body of the post
+
+=item yr
+
+=item mo
+
+=item mo_num
+
+=item da
+
+=item dw
+
+=item hr
+
+=item min
+
+Timestamp of entry. mo = month name; dw = day name
+
+=item path
+
+The folder in which the post lives, relative to the blog's base URL.
+
+=item fn
+
+The filename of the post, sans extension.
+
+=back
+
+These should be returned such that it is true that
+
+  $path . "/" . $fn . "." . $flavour eq $request_url
+
+i.e. these components together are what was originally asked for. (Note that
+flavour is a variable available to templates but not returned by this method.)
+
+=cut
+
+sub entry_data {
+    my ($self, $entry) = @_;
+
+    my $entry_data = {};
+
+    my $fn = $entry->[0];
+
+    {
+        open my $fh, "<", File::Spec->catfile($self->{datadir}, $fn);
+        my $title = <$fh>; chomp $title;
+        $entry_data->{title} = $title;
+
+        $entry_data->{body} = join "", <$fh>;
+        close $fh;
+    }
+    
+    {
+        my @path = (File::Spec->splitpath($fn));
+        $fn = pop @path;
+        $fn =~ s/\.$self->{file_extension}$//;
+        $entry_data->{fn} = $fn;
+        $entry_data->{path} = File::Spec->catpath(@path);
+    }
+
+    {
+        my $i = 1;
+        my %month2num = map {$_, $i++} qw(Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec);
+        my $c_time = ctime($entry->[1]->{date});
+        my($dw,$mo,$da,$hr,$min,$yr) = ( $c_time =~ /(\w{3}) +(\w{3}) +(\d{1,2}) +(\d{2}):(\d{2}):\d{2} +(\d{4})$/ );
+        $da = sprintf("%02d", $da);
+        my $mo_num = $month2num{$mo};
+        $mo_num = sprintf("%02d", $mo_num);
+
+        @{$entry_data}{qw(dw mo da yr mo_num hr min)} = ($dw, $mo, $da, $yr, $mo_num, $hr, $min);
     }
 }
 
