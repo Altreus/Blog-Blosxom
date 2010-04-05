@@ -1,16 +1,14 @@
 Blog-Blosxom
 
-The README is used to introduce the module and provide instructions on
-how to install the module, any machine dependencies it may have (for
-example C compilers and installed libraries) and any other information
-that should be provided before the module is installed.
+This module is a rewrite of the blosxom cgi script found at www.blosxom.com.
+It needed a rewrite so I did it.
 
-A README file is required for CPAN modules since CPAN extracts the README
-file from a module distribution so that people browsing the archive
-can use it to get an idea of the module's uses. It is usually a good idea
-to provide version information here so that people can decide whether
-fixes for the module are worth downloading.
+See the POD of Blog::Blosxom for usage information and on writing plugins,
+and the examples directory for example usage and plugin examples.
 
+See also the POD for information on flavouring. Flavouring is the name the guy
+who wrote Blosxom gave to the method of creating templates for different ways
+of formatting the same blog data.
 
 INSTALLATION
 
@@ -20,6 +18,10 @@ To install this module, run the following commands:
 	make
 	make test
 	make install
+
+Or this one command;
+
+    cpan Blog::Blosxom
 
 SUPPORT AND DOCUMENTATION
 

@@ -3,6 +3,8 @@ MANIFEST
 Makefile.PL
 README
 lib/Blog/Blosxom.pm
+examples/cgi.pl
+examples/subclassing.pl
 t/00-load.t
 t/manifest.t
 t/pod-coverage.t
