@@ -36,7 +36,7 @@ processing and puts it into neat containers where it can be seen and fixed.
 
 =cut
 
-our $VERSION = '0.01';
+our $VERSION = '0.02';
 
 =head1 SYNOPSIS
 
@@ -300,7 +300,7 @@ sub template {
 
             # Stop looking when there is no $path to go between datadir and the
             # template file. For portability, we can't check whether it is a "/"
-            last if !$path;
+            last if !$path or $path eq File::Spec->rootdir;
 
             # Look one dir higher and go again.
             my @dir = File::Spec->splitdir($path);
