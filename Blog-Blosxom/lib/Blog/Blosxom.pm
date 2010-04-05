@@ -3,7 +3,6 @@ package Blog::Blosxom;
 use warnings;
 use strict;
 
-use CGI qw(:standard :netscape);
 use FindBin;
 use FileHandle;
 use File::Find;
@@ -242,7 +241,29 @@ sub run {
     # Build an index page for the path
     my @entries = $self->entries_for_path($path);
     @entries = $self->filter(@entries);
+    @entries = $self->sort(@entries);
+    
+    # A special template. The user is going to need to know this, but not print it.
+    $self->{content_type} = $self->template($path, "content_type", $flavour);
 
+    my @templates;
+    push @templates, $self->interpolate($self->template($path, "head", $flavour));
+
+    my $date;
+    for my $entry (@entries) {
+        # TODO: Here is an opportunity to style the entries in the style
+        # of the subdir they came from.
+        if ($date != ($date = $entry->[1]->{date})) {
+            push @templates, $self->interpolate($self->template($path, "date", $flavour), $date);
+        }
+
+        my $entry_data = $self->entry_data($entry);
+        push @templates, $self->interpolate($self->template($path, "story", $flavour), $entry_data);
+    }
+
+    push @templates, $self->interpolate($self->template($path, "foot", $flavour));
+    # A skip plugin will stop processing just before anything is output.
+    # Not sure why.
     return if $self->_check_plugins('skip');
 }
 
