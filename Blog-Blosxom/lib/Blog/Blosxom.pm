@@ -402,11 +402,10 @@ sub date_of_post {
     return stat($fn)->mtime;
 }
 
-=head2 filter
+=head2 filter (@entries)
 
-The filter is a subref that is provided with the file and whatever hashref
-is created for the file by entries_for_path. The default is that the
-hashref only contains the date of the file.
+This function returns only the desired entries from the array passed in. By
+default it just returns the array back, so is just a place to check for plugins.
 
 This can be overridden by plugins in order to alter the way the module filters
 the files. See L<PLUGINS> for more details.
@@ -416,12 +415,9 @@ the files. See L<PLUGINS> for more details.
 sub filter {
     my ($self, @entries) = @_;
 
-    if (my $filter = $self->_check_plugins('filter')) {
-        my @remaining_files = grep { $filter->( @$_ ) } @entries;
-        return @remaining_files;
-    }
+    my @remaining_files = $self->_check_plugins("filter", @_);
 
-    return @entries;
+    return @remaining_files || @entries;
 }
 
 =head2 sort (@entries) 
@@ -593,8 +589,6 @@ sub entry_data {
         @{$entry_data}{qw(dw mo da yr mo_num hr min)} = ($dw, $mo, $da, $yr, $mo_num, $hr, $min);
     }
 
-    use Data::Dumper;
-    die Dumper $entry_data;
     return $entry_data;
 }
 
@@ -659,8 +653,10 @@ sub _check_plugins {
 
     for my $plugin (@{$self->{plugins_ordered}}) {
         local $self->{no_plugins} = 1;
-        return $plugin->$method($self, @underscore)
-        if $plugin->can($method);
+        my @return;
+        @return = $plugin->$method($self, @underscore) if $plugin->can($method);
+
+        return @return if @return;
     }
 }
 
@@ -791,14 +787,6 @@ directory at all.
 It is worth noting that you can override how Blosxom decides the date of the
 file by implementing the date_of_post method instead of this one.
 
-=head3 filter (@entries)
-
-This function does nothing by default and is a hook by which you can 
-scrupulously filter out posts one way or another. You are given the output of
-the C<entries_for_path> method above, and you should return an array in exactly
-the same format, except having removed any entries you do not want to show up on
-the generated page.
-
 =head3 date_of_post ($post)
 
 The post provided will be the filename and path to the post, relative to the
@@ -807,6 +795,24 @@ arrayref where [0] is the 4-digit year, [1] is the 2-digit month, and [2] is
 the 2-digit day. This is not checked for validity but will probably cause 
 something to blow up somewhere if it is not a real date.
 
+=head3 filter (@entries)
+
+This function does nothing by default and is a hook by which you can 
+scrupulously filter out posts one way or another. You are given the output of
+the C<entries_for_path> method above, and you should return an array in exactly
+the same format, except having removed any entries you do not want to show up on
+the generated page.
+
+=head3 sort (@entries)
+
+You can override the default sorting mechanism, which is by date by default,
+by implementing this method. It is advisable to empty your date template if
+you do this, because the date template is inserted every time the date changes
+as processing goes down the list.
+
+A future release may see the date template replaced by a divider template, which
+would be configurable and merely default to the date.
+
 =head3 skip
 
 The skip function is a feature from the original blosxom. Setting it to return
@@ -814,6 +820,26 @@ a true value will cause the Blosxom object to stop just before anything is
 actually output. That is, it will find all the entries and pull in the templates
 but not do anything with them if any active plugin makes this function return 
 true. This is useful if, e.g., your plugin issues a redirect header.
+
+=head3 interpolate ($template, $extra_data)
+
+This is where you can override the default way in which the variables are
+interpolated into the template.
+
+The extra data will be a hashref of var => val, var being the variable name to
+interpolate, without its $.
+
+=head3 entry_data ($entry)
+
+This is provided with an arrayref as returned by entries_for_path, and should
+return a hashref with the keys as described above, in the method's own
+documentation. Briefly, they are 
+
+ title body yr mo mo_name da dw hr min path fn
+
+You may also provide any extra keys that your own templates may want. See above
+about how to call the default function and then alter the return value instead
+of completely reimplementing it.
 
 =head1 AUTHOR
 
