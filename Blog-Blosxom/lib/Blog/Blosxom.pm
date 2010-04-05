@@ -157,6 +157,8 @@ sub new {
             unless exists $params{$_} && $params{$_};
     }
 
+    die $params{datadir} . " does not exist!" unless -d $params{datadir};
+
     my %defaults = (
         blog_description    => "",
         blog_language       => "en",
@@ -236,13 +238,13 @@ sub run {
 
     my @entries;
 
-    if (-f $path . "." . $self->{file_extension}) $self->{single_entry} = 1;
+    $self->{single_entry} = 1 if (-f $path . "." . $self->{file_extension});
 
     $self->{path_info} = $path;
     $self->{flavour} = $flavour;
 
     # Build an index page for the path
-    my @entries = $self->entries_for_path($path);
+    @entries = $self->entries_for_path($path);
     @entries = $self->filter(@entries);
     @entries = $self->sort(@entries);
     
@@ -281,7 +283,7 @@ applied to the datadir in order to find the actual file anyway.
 =cut
 
 sub template {
-    my ($path, $comp, $flavour) = @_;
+    my ($self, $path, $comp, $flavour) = @_;
 
     my $template;
 
@@ -301,7 +303,7 @@ sub template {
             last if !$path;
 
             # Look one dir higher and go again.
-            @dir = File::Spec->splitdir($path);
+            my @dir = File::Spec->splitdir($path);
             pop @dir;
             $path = File::Spec->catdir(@dir);
             my $fn = File::Spec->catfile($self->{datadir}, $path, "$comp.$flavour");
@@ -335,8 +337,10 @@ sub entries_for_path {
 
     return @entries if @entries = $self->_check_plugins('entries', @_);
 
-    my $filter = $self->filter_for_path($path);
     my $abs_path = File::Spec->catdir( $self->{datadir}, $path );
+
+    # If this is an entry, return it.
+    return $path if (-f $abs_path . "." . $self->{file_extension});
 
     if (-d $abs_path) {
         # We use File::Find on a real path
@@ -350,8 +354,10 @@ sub entries_for_path {
 
             # not specifying a file extension is a bit silly.
             if (!$fex || /\.$fex/) {
+                no warnings "once"; # File::Find::name causes a warning.
+
                 my $rel_file = File::Spec->catfile( $rel_path, $_ );
-                my $date = $self->date_of_post($File::Find::file);
+                my $date = $self->date_of_post($File::Find::name);
                 my $file_info = { date => $date };
 
                 push @entries, [$rel_file, $file_info ];
@@ -360,7 +366,7 @@ sub entries_for_path {
             $File::Find::prune = ($self->{depth} && $curdepth > $self->{depth});
         };
 
-        File::Find( $find, $abs_path );
+        File::Find::find( $find, $abs_path );
     }
     else {
         # We use date stuff on a fake path.
@@ -411,11 +417,29 @@ sub filter {
     my ($self, @entries) = @_;
 
     if (my $filter = $self->_check_plugins('filter')) {
-        my @remaining_files = map { $filter->( @$_ ) } @entries;
+        my @remaining_files = grep { $filter->( @$_ ) } @entries;
         return @remaining_files;
     }
 
-    return sub{1};
+    return @entries;
+}
+
+=head2 sort (@entries) 
+
+Sort @entries and return the new list.
+
+Default behaviour is to sort by date.
+
+=cut
+
+sub sort {
+    my ($self, @entries) = @_;
+
+    my @sorted_entries;
+    return @sorted_entries if @sorted_entries = $self->_check_plugins("sort", @_);
+
+    @sorted_entries = sort { $a->[1]->{date} <=> $b->[1]->{date} } @entries;
+    return @sorted_entries;
 }
 
 =head2 static_mode($password, $on)
@@ -475,11 +499,16 @@ sub interpolate {
     # I couldn't think of a better way. I don't think there are any blosxom::
     # namespace vars that need to be exposed to templates, but other plugins
     # may make some.
-    $template =~ s/(\$\w+(?:::)?\w*)/"defined $1 ? $1 : ''"/gee;
+    $template =~ s/(\$\w+(?:::\w+)?)/"defined $1 ? $1 : ''"/gee;
     return $template;
 }
 
 =head2 entry_data ($entry) 
+
+Provided with the entry data, which is an arrayref with the entry filename,
+relative to datadir, in the first slot and a hashref in the second. The hashref
+will have at least a date entry, being a UNIX timestamp for the entry. See
+the section on plugin entries.
 
 Returns a hashref containing the following keys:
 
@@ -563,6 +592,10 @@ sub entry_data {
 
         @{$entry_data}{qw(dw mo da yr mo_num hr min)} = ($dw, $mo, $da, $yr, $mo_num, $hr, $min);
     }
+
+    use Data::Dumper;
+    die Dumper $entry_data;
+    return $entry_data;
 }
 
 ## PRIVATE FUNCTIONS
@@ -577,7 +610,7 @@ sub _load_plugins {
     my $dir = $self->{plugins_dir};
     return unless $dir;
 
-    opendir my $plugins, $dir;
+    opendir my($plugins), $dir;
 
     # blosxom docs say modules ending in _ will not be loaded.
     for my $plugin (grep { /^\w+$/ && !/_$/ && -f File::Spec->join($dir, $_) }
@@ -586,12 +619,12 @@ sub _load_plugins {
         $plugin =~ s/^\d+//;
 
         # This will blow up if your package name is not the same as your file name.
-        require "$plugin_dir/$plugin";
+        require "$dir/$plugin";
         if ($plugin->start()) {
-            $self->{active_plugins}->{$plugin_name} = 1;
+            $self->{active_plugins}->{$plugin} = 1;
 
             $self->{plugins_ordered} ||= [];
-            push @{$self->{plugins_ordered}}, $plugin_name;
+            push @{$self->{plugins_ordered}}, $plugin;
         }
     }
 
@@ -872,5 +905,3 @@ error head <html><body><p><font color="red">Error: I'm afraid this is the first 
 error story <p><b>$title</b><br />$body <a href="$url/$yr/$mo_num/$da#fn.$default_flavour">#</a></p>\n
 error date <h3>$dw, $da $mo $yr</h3>\n
 error foot </body></html>
-__END__
-
