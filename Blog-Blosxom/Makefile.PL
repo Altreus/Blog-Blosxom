@@ -8,7 +8,7 @@ WriteMakefile(
     VERSION_FROM        => 'lib/Blog/Blosxom.pm',
     ABSTRACT_FROM       => 'lib/Blog/Blosxom.pm',
     ($ExtUtils::MakeMaker::VERSION >= 6.3002
-      ? ('LICENSE'=> 'perl')
+      ? ('LICENSE'=> 'x11')
       : ()),
     PL_FILES            => {},
     PREREQ_PM => {
