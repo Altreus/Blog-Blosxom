@@ -36,7 +36,7 @@ processing and puts it into neat containers where it can be seen and fixed.
 
 =cut
 
-our $VERSION = '0.02';
+our $VERSION = '0.03';
 
 =head1 SYNOPSIS
 
