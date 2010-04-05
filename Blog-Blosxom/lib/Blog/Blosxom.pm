@@ -197,6 +197,55 @@ sub new {
     return $self;
 }
 
+=head2 run ($path, $flavour)
+
+It is now the responsibility of the user to provide the correct path and 
+flavour. That is because there are several ways that you can gain this
+information, and it is not up to this engine to decide what they are. That is,
+this information comes from the request URL and, possibly, the parameter string,
+POST, cookies, what-have-you.
+
+Therefore:
+
+=over
+
+=item
+
+The path is the entire path up to the filename. The filename shall not include
+a file extension. The filename is optional, and if omitted, the directory given
+will be searched for all entries and an index page generated.
+
+=item
+
+The flavour can be gathered in any manner you desire. The original Blosxom
+script would use either a parameter string, C<?flav=html>, or simply by using
+the flavour as the file extension for the requested path.
+
+=back
+
+No flavour provided will result in the default being used, obviously. No path
+being provided will result in the root path being used, since these are 
+equivalent.
+
+=cut
+
+sub run {
+    my ($self, $path, $flavour) = @_;
+
+    $path ||= "";
+    $flavour ||= $self->{default_flavour};
+
+    my @entries;
+
+    if (-f $path . "." . $self->{file_extension}) $self->{single_entry} = 1;
+
+    # Build an index page for the path
+    my @entries = $self->entries_for_path($path);
+    @entries = $self->filter(@entries);
+
+    return if $self->_check_plugins('skip');
+}
+
 =head2 template($path, $component, $flavour)
 
 Returns a chunk of markup for the requested component in the requested flavour for the 
@@ -279,9 +328,7 @@ sub entries_for_path {
                 my $date = $self->date_of_post($File::Find::file);
                 my $file_info = { date => $date };
 
-                if ($self->filter($rel_file, $file_info)) {
-                    push @entries, [$rel_file, $file_info ];
-                }
+                push @entries, [$rel_file, $file_info ];
             }
 
             $File::Find::prune = ($self->{depth} && $curdepth > $self->{depth});
@@ -307,7 +354,7 @@ sub entries_for_path {
     return @entries;
 }
 
-=head2 filter_for_path
+=head2 filter
 
 The filter is a subref that is provided with the file and whatever hashref
 is created for the file by entries_for_path. The default is that the
@@ -319,10 +366,11 @@ the files. See L<PLUGINS> for more details.
 =cut
 
 sub filter {
-    my ($self, $post, $file_info) = @_;
+    my ($self, @entries) = @_;
 
-    if (my $filter = $self->_check_plugins('filter', @_)) {
-        return $filter;
+    if (my $filter = $self->_check_plugins('filter')) {
+        my @remaining_files = map { $filter->( @$_ ) } @entries;
+        return @remaining_files;
     }
 
     return sub{1};
@@ -412,8 +460,10 @@ sub _check_plugins {
     my ($self, $method, @underscore) = @_;
 
     return unless $self->{plugins_ordered};
+    return if $self->{no_plugins};
 
     for my $plugin (@{$self->{plugins_ordered}}) {
+        local $self->{no_plugins} = 1;
         return $plugin->$method($self, @underscore)
         if $plugin->can($method);
     }
@@ -431,12 +481,12 @@ In order to use a plugin directory, the package name in the plugin file must
 be identical to the filename itself. That is because the blosxom engine uses
 the filename to know which package to give to C<require>. The only thing that
 deviates from this rule is that you can prepend the filename with any number of
-digits, and these will be used to load the plugins in numerical order.
+digits, and these will be used to load the plugins in order. The order is that
+returned by the sort function, so it is recommended all your numbers have the
+same number of digits.
 
-In order to disable a plugin, therefore, you can rename it to something other
-than the package name. Traditionally, adding an underscore to the filename is
-the way you turn it off. Alternatively you could edit the file itself and
-make the C<start> function return 0 instead of 1.
+In order to disable a plugin, simply alter its C<start> subroutine to return a
+false value instead of a true one.
 
 =head2 Starting a plugin
 
@@ -479,6 +529,12 @@ the filename, then in the cases where the filename does not define a date, you
 can simply C<return;> and processing will continue as if it had not defined 
 this functionality in the first place.
 
+Also also in all cases, you can get the return value of the default method by
+simply calling $self->method. This is helpful if you want to slightly but not
+wildly alter the output, such as adding extra information to the same set of
+data. Obviously this is not true of C<start> and C<skip>, since these are not
+methods on the class in the first place.
+
 =head3 start
 
 The C<start> subroutine is required in your module and will return either a
@@ -511,8 +567,6 @@ that magic HTML.
 
 =head3 entries_for_path ($path)
 
-You can also just call this function C<entries>.
-
 This returns an array of items. Each item is itself an arrayref, whose first
 entry is the filename and whose second entry is a hashref. The hashref is
 required to contain the 'date' key, which specifies the date of the file. That
@@ -542,20 +596,13 @@ directory at all.
 It is worth noting that you can override how Blosxom decides the date of the
 file by implementing the date_of_post method instead of this one.
 
-=head3 filter ($post)
+=head3 filter (@entries)
 
-This function is empty by default (rather, it returns true by default) and is
-a hook by which you can scrupulously filter out posts one way or another. You
-are provided with the full path to the post, relative to C<< $self->{datadir} >>,
-including its filename. You should return a true value if you want this post to
-be included in the posts shown on the page, and false if you want it to be
-omitted.
-
-B<Please note:> This method, and hence its plugins, are called from the
-C<entries_for_path> method. If you write a plugin that overrides I<that>, you
-should make very sure that that method calls this one at some point before it
-adds the entry to the returned array. Otherwise, your filters will never be
-applied.
+This function does nothing by default and is a hook by which you can 
+scrupulously filter out posts one way or another. You are given the output of
+the C<entries_for_path> method above, and you should return an array in exactly
+the same format, except having removed any entries you do not want to show up on
+the generated page.
 
 =head3 date_of_post ($post)
 
@@ -564,6 +611,14 @@ root of the blog directory, C<< $self->{datadir} >>. You should return an
 arrayref where [0] is the 4-digit year, [1] is the 2-digit month, and [2] is
 the 2-digit day. This is not checked for validity but will probably cause 
 something to blow up somewhere if it is not a real date.
+
+=head3 skip
+
+The skip function is a feature from the original blosxom. Setting it to return
+a true value will cause the Blosxom object to stop just before anything is
+actually output. That is, it will find all the entries and pull in the templates
+but not do anything with them if any active plugin makes this function return 
+true. This is useful if, e.g., your plugin issues a redirect header.
 
 =head1 AUTHOR
 
@@ -641,7 +696,7 @@ See http://dev.perl.org/licenses/ for more information.
 
 __DATA__
 html content_type text/html
-html head <html><head><link rel="alternate" type="type="application/rss+xml" title="RSS" href="$url/index.rss" /><title>$blog_title $path_info_da $path_info_mo $path_info_yr</title></head><body><h1>$blog_title</h1><p>$path_info_da $path_info_mo $path_info_yr</p>
+html head <html><head><link rel="alternate" type="application/rss+xml" title="RSS" href="$url/index.rss" /><title>$blog_title $path_info_da $path_info_mo $path_info_yr</title></head><body><h1>$blog_title</h1><p>$path_info_da $path_info_mo $path_info_yr</p>
 html story <h2><a name="$fn">$title</a></h2><p>$body</p><p>posted at: $ti | path: <a href="$url$path">$path</a> | <a href="$url/$yr/$mo_num/$da#$fn">permanent link to this entry</a></p>\n
 html date <h3>$dw, $da $mo $yr</h3>\n
 html foot <p><a href="http://www.blosxom.com/"><img src="http://www.blosxom.com/images/pb_blosxom.gif" border="0" /></a></p></body></html>
