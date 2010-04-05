@@ -10,6 +10,11 @@ See also the POD for information on flavouring. Flavouring is the name the guy
 who wrote Blosxom gave to the method of creating templates for different ways
 of formatting the same blog data.
 
+Please note that the prerequisites for the examples are not prerequisites for
+the module and hence are not automatically installed by CPAN.
+
+Unit tests will be ready before version 0.1.
+
 INSTALLATION
 
 To install this module, run the following commands:
