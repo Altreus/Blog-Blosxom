@@ -357,6 +357,7 @@ sub entries_for_path {
                 no warnings "once"; # File::Find::name causes a warning.
 
                 my $rel_file = File::Spec->catfile( $rel_path, $_ );
+                $rel_file = File::Spec->canonpath($rel_file); # This removes any artefacts like ./
                 my $date = $self->date_of_post($File::Find::name);
                 my $file_info = { date => $date };
 
@@ -496,6 +497,7 @@ sub interpolate {
     # namespace vars that need to be exposed to templates, but other plugins
     # may make some.
     $template =~ s/(\$\w+(?:::\w+)?)/"defined $1 ? $1 : ''"/gee;
+
     return $template;
 }
 
