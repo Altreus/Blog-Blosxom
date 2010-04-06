@@ -36,7 +36,7 @@ processing and puts it into neat containers where it can be seen and fixed.
 
 =cut
 
-our $VERSION = '0.03';
+our $VERSION = '0.05';
 
 =head1 SYNOPSIS
 
@@ -236,6 +236,8 @@ sub run {
     $path ||= "";
     $flavour ||= $self->{default_flavour};
 
+    $path =~ s|^/||;
+
     my @entries;
 
     $self->{single_entry} = 1 if (-f $path . "." . $self->{file_extension});
@@ -254,15 +256,20 @@ sub run {
     my @templates;
     push @templates, $self->interpolate($self->template($path, "head", $flavour));
 
-    my $date;
+    my $date = "";
     for my $entry (@entries) {
         # TODO: Here is an opportunity to style the entries in the style
         # of the subdir they came from.
-        if ($date != ($date = $entry->[1]->{date})) {
-            push @templates, $self->interpolate($self->template($path, "date", $flavour), {date=>$date} );
+        my $entry_data = $self->entry_data($entry);
+        my $entry_date = join " ", @{$entry_data}{qw(da mo yr)};
+
+        if ($date ne $entry_date) {
+            $date = $entry_date;
+            my $date_data = { map { $_ => $entry_data->{$_} } qw( yr mo mo_num dw da hr min ) };
+
+            push @templates, $self->interpolate($self->template($path, "date", $flavour), $date_data );
         }
 
-        my $entry_data = $self->entry_data($entry);
         push @templates, $self->interpolate($self->template($path, "story", $flavour), $entry_data);
     }
 
@@ -306,7 +313,7 @@ sub template {
             my @dir = File::Spec->splitdir($path);
             pop @dir;
             $path = File::Spec->catdir(@dir);
-            my $fn = File::Spec->catfile($self->{datadir}, $path, "$comp.$flavour");
+            $fn = File::Spec->catfile($self->{datadir}, $path, "$comp.$flavour");
         }
     }
 
@@ -340,7 +347,10 @@ sub entries_for_path {
     my $abs_path = File::Spec->catdir( $self->{datadir}, $path );
 
     # If this is an entry, return it.
-    return $path if (-f $abs_path . "." . $self->{file_extension});
+    if (-f $abs_path . "." . $self->{file_extension}) {
+        my $date = $self->date_of_post($abs_path . "." . $self->{file_extension});
+        return [ $path . "." . $self->{file_extension}, { date => $date } ];
+    }
 
     if (-d $abs_path) {
         # We use File::Find on a real path
@@ -583,7 +593,9 @@ sub entry_data {
         my $i = 1;
         my %month2num = map {$_, $i++} qw(Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec);
         my $c_time = ctime($entry->[1]->{date});
+
         my($dw,$mo,$da,$hr,$min,$yr) = ( $c_time =~ /(\w{3}) +(\w{3}) +(\d{1,2}) +(\d{2}):(\d{2}):\d{2} +(\d{4})$/ );
+
         $da = sprintf("%02d", $da);
         my $mo_num = $month2num{$mo};
         $mo_num = sprintf("%02d", $mo_num);
