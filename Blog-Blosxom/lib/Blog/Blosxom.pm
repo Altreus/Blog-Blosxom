@@ -363,7 +363,7 @@ sub entries_for_path {
             my $fex = $self->{file_extension};
 
             # not specifying a file extension is a bit silly.
-            if (!$fex || /\.$fex/) {
+            if (!$fex || /\.$fex$/) {
                 no warnings "once"; # File::Find::name causes a warning.
 
                 my $rel_file = File::Spec->catfile( $rel_path, $_ );
