@@ -36,7 +36,7 @@ processing and puts it into neat containers where it can be seen and fixed.
 
 =cut
 
-our $VERSION = '0.05';
+our $VERSION = '0.06';
 
 =head1 SYNOPSIS
 
@@ -358,7 +358,7 @@ sub entries_for_path {
             return unless -f;
 
             my $rel_path = File::Spec->abs2rel( $File::Find::dir, $self->{datadir} );
-            my $curdepth = File::Spec->splitpath($rel_path);
+            my $curdepth = File::Spec->splitdir($rel_path);
 
             my $fex = $self->{file_extension};
 
@@ -382,16 +382,24 @@ sub entries_for_path {
     else {
         # We use date stuff on a fake path.
         # TODO: see whether we can split the path into a date section and a real section.
-        my @ymd = File::Spec->splitpath( $path );
+        my @ymd = File::Spec->splitdir( $path );
         my @all_entries = $self->entries_for_path( "" );
 
-        for( @all_entries ) {
-            if (                   $ymd[0] == $_[1]->{date}->[0]
-            && (!exists $ymd[1] or $ymd[1] == $_[1]->{date}->[1])
-            && (!exists $ymd[2] or $ymd[2] == $_[1]->{date}->[2])) {
-                push @entries, $_;
-            }
-        }
+        my @entries = grep {
+            my $post_date = localtime( $_->[1]{date} );
+            
+            # requested year                                                                              
+            ($ymd[0]  == ($post_date->year+1900)) 
+            and 
+            # matches month, or moth not requested
+            (!$ymd[1] || $ymd[1] == ($post_date->mon+1))
+            and
+            # matches day, or day not rquested
+            (!$ymd[2] || $ymd[2] == $post_date->mday)
+
+            ? $_ : () 
+
+        } @all_entries;
     }
 
     return @entries;
@@ -503,10 +511,14 @@ sub interpolate {
         $template =~ s/\$$var\b/$self->{$var}/g;
     }
 
-    # I couldn't think of a better way. I don't think there are any blosxom::
-    # namespace vars that need to be exposed to templates, but other plugins
-    # may make some.
-    $template =~ s/(\$\w+(?:::\w+)?)/"defined $1 ? $1 : ''"/gee;
+    {
+        no strict 'vars';
+        # I couldn't think of a better way. I don't think there are any blosxom::
+        # namespace vars that need to be exposed to templates, but other plugins
+        # may make some. Not that $1 becomes the var name without the $ on it so
+        # we can put it back if it doesn't exist.
+        $template =~ s/(?:\$(\w+(?:::\w+)?))/"defined \$$1 ? \$$1 : '\$$1'"/gee;
+    }
 
     return $template;
 }
