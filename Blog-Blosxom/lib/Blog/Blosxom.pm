@@ -36,7 +36,7 @@ processing and puts it into neat containers where it can be seen and fixed.
 
 =cut
 
-our $VERSION = '0.06';
+our $VERSION = '0.07';
 
 =head1 SYNOPSIS
 
@@ -254,7 +254,6 @@ sub run {
     $self->{content_type} = $self->template($path, "content_type", $flavour);
 
     my @templates;
-    push @templates, $self->interpolate($self->template($path, "head", $flavour));
 
     my $date = "";
     for my $entry (@entries) {
@@ -273,6 +272,8 @@ sub run {
         push @templates, $self->interpolate($self->template($path, "story", $flavour), $entry_data);
     }
 
+    # If we do head and foot last, we let plugins use data about the contents in them.
+    unshift @templates, $self->interpolate($self->template($path, "head", $flavour));
     push @templates, $self->interpolate($self->template($path, "foot", $flavour));
     # A skip plugin will stop processing just before anything is output.
     # Not sure why.
