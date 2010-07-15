@@ -36,7 +36,7 @@ processing and puts it into neat containers where it can be seen and fixed.
 
 =cut
 
-our $VERSION = '0.07';
+our $VERSION = '0.08';
 
 =head1 SYNOPSIS
 
@@ -174,6 +174,7 @@ sub new {
         static_password     => "",
         static_flavours     => [qw(html rss)],
         static_entries      => 0,
+        require_namespace   => 0,
     );
 
     %params = (%defaults, %params);
@@ -240,8 +241,6 @@ sub run {
 
     my @entries;
 
-    $self->{single_entry} = 1 if (-f $path . "." . $self->{file_extension});
-
     $self->{path_info} = $path;
     $self->{flavour} = $flavour;
 
@@ -249,7 +248,9 @@ sub run {
     @entries = $self->entries_for_path($path);
     @entries = $self->filter(@entries);
     @entries = $self->sort(@entries);
-    
+
+    $self->{entries} = [];
+
     # A special template. The user is going to need to know this, but not print it.
     $self->{content_type} = $self->template($path, "content_type", $flavour);
 
@@ -260,21 +261,24 @@ sub run {
         # TODO: Here is an opportunity to style the entries in the style
         # of the subdir they came from.
         my $entry_data = $self->entry_data($entry);
-        my $entry_date = join " ", @{$entry_data}{qw(da mo yr)};
+        push @{$self->{entries}}, $entry_data;
+
+        my $entry_date = join " ", @{$entry_data}{qw(da mo yr)}; # To create a date entry when it changes.
 
         if ($date ne $entry_date) {
             $date = $entry_date;
             my $date_data = { map { $_ => $entry_data->{$_} } qw( yr mo mo_num dw da hr min ) };
 
-            push @templates, $self->interpolate($self->template($path, "date", $flavour), $date_data );
+            push @templates, $self->interpolate($self->template($path, "date", $flavour), $date_data);
         }
 
         push @templates, $self->interpolate($self->template($path, "story", $flavour), $entry_data);
     }
 
     # If we do head and foot last, we let plugins use data about the contents in them.
-    unshift @templates, $self->interpolate($self->template($path, "head", $flavour));
-    push @templates, $self->interpolate($self->template($path, "foot", $flavour));
+    unshift @templates, $self->interpolate($self->template($path, "head", $flavour), $self->head_data());
+    push @templates, $self->interpolate($self->template($path, "foot", $flavour), $self->foot_data());
+
     # A skip plugin will stop processing just before anything is output.
     # Not sure why.
     return if $self->_check_plugins('skip');
@@ -493,6 +497,74 @@ template has a title and a body. Those are provided in the extra data, which is
 a hashref with the variable name to be replaced (without the $) as the key, and
 the corresponding value as the value.
 
+By default, a different set of variables are available to each template:
+
+=head3 All templates
+
+These are defined by you when you provide them to new() or run()
+
+=over
+
+=item blog_title
+ 
+=item blog_description
+
+=item blog_language
+
+=item url
+
+=item path_info
+
+=item flavour
+
+=back
+
+=head3 Story (entry) template
+
+These are defined by the entry.
+
+=over
+
+=item title
+
+Post title
+
+=item body
+
+The body of the post
+
+=item yr
+
+=item mo
+
+=item mo_num
+
+=item da
+
+=item dw
+
+=item hr
+
+=item min
+
+Timestamp of entry. mo = month name; dw = day name
+
+=item path
+
+The folder in which the post lives, relative to the blog's base URL.
+
+=item fn
+
+The filename of the post, sans extension.
+
+=back
+
+=head3 Head template
+
+=over
+
+=item title
+
 This method can be overridden by a plugin.
 
 =cut
@@ -504,12 +576,23 @@ sub interpolate {
     return $done if $done = $self->_check_plugins("interpolate", @_);
 
     for my $var (keys %$extra_data){
-        $template =~ s/\$$var\b/$extra_data->{$var}/g;
+        if($self->{require_namespace}) {
+            $template =~ s/\$blosxom::$var\b/$extra_data->{$var}/g;
+        }
+        else {
+            $template =~ s/\$(?:blosxom::)?$var\b/$extra_data->{$var}/g;
+        }
     }
 
     # The blosxom docs say these are global vars, so let's mimic that.
     for my $var (qw(blog_title blog_description blog_language url path_info flavour)) {
-        $template =~ s/\$$var\b/$self->{$var}/g;
+        # You can set this option so that only $blosxom::foo variables are interpolated
+        if($self->{require_namespace}) {
+            $template =~ s/\$blosxom::$var\b/$self->{$var}/g;
+        }
+        else {
+            $template =~ s/\$(?:blosxom::)?$var\b/$self->{$var}/g;
+        }
     }
 
     {
@@ -617,6 +700,39 @@ sub entry_data {
     }
 
     return $entry_data;
+}
+
+=head2 head_data ()
+
+Return the data you want to be available to the head template. The head is
+attached to the top of the output I<after> the entries have been run through,
+so you have the data for all the entry data available to you in the arrayref
+$self->{entries}.
+
+Example:
+
+    my $self = shift;
+    my $data = {};
+    if(@{$self->{entries}} == 1) {
+        $data->{title} = $self->{entries}->[0]->{title}
+    }
+    return $data;
+
+=cut
+
+sub head_data {
+    +{};
+}
+
+=head2 foot_data () 
+
+Return the data you want to be available in your foot template. This is attached
+to the output after everything else, as you'd expect.
+
+=cut
+
+sub foot_data {
+    +{};
 }
 
 ## PRIVATE FUNCTIONS
@@ -856,6 +972,21 @@ interpolated into the template.
 The extra data will be a hashref of var => val, var being the variable name to
 interpolate, without its $.
 
+If you don't call the parent function for this, be aware that there is an
+option called $self->{require_namespace}, which means that only fully-qualified
+variables will be interpolated. You should honour this if you intend anyone
+else to use your plugin.
+
+The three functions C<entry_data>, C<head_data> and C<foot_data> return simple
+hashrefs that are interpolated in this function.
+
+You should also be aware that there are several "global" variables, available
+to all templates, that are not returned by any of those functions. They are
+hard-coded in the default implementation of C<interpolate>, so it is probably
+for the best if you defer to this method.
+
+The section on usage will probably help here.
+
 =head3 entry_data ($entry)
 
 This is provided with an arrayref as returned by entries_for_path, and should
@@ -864,9 +995,31 @@ documentation. Briefly, they are
 
  title body yr mo mo_name da dw hr min path fn
 
-You may also provide any extra keys that your own templates may want. See above
-about how to call the default function and then alter the return value instead
-of completely reimplementing it.
+You may also provide any extra keys that your own templates may want. It is
+recommended that you use next::method to get the default hashref, and add more
+things to it.
+
+See the section on usage for how all this works and thus to get a better idea
+of what you should or should not be overriding.
+
+=head3 head_data
+
+This function is called to get the data required for the head template. By
+default, only the global variables are available in the head template.
+
+You may override any global variable by returning it as a key in this hashref,
+or you can add to the set of available variables instead. See the section on
+usage for how all this works.
+
+=head3 foot_data
+
+This function is called to provide data to the foot template. By default it
+returns an empty hashref.
+
+You may override any global variable by returning it as a key in this hashref,
+or you can add to the set of available variables instead.
+
+See the section on usage for how all this works.
 
 =head1 AUTHOR
 
