@@ -18,7 +18,7 @@ use Blog::Blosxom;
 
 # Note that in your own script you should know exactly where the datadir is.
 # See Blog::Blosxom docs for all the available params to new.
-my $blog = My::Blosxom->new(
+my $blog = Blog::Blosxom->new(
     datadir => File::Spec->catdir($FindBin::Bin, "..", "blog"),
     blog_title => "My Blog",
     blog_description => "A blog for blogging with",
