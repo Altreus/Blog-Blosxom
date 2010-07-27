@@ -18,22 +18,6 @@ Blog::Blosxom - A module version of the apparently inactive blosxom.cgi
 
 Version 0.01
 
-=head1 DESCRIPTION
-
-Blosxom is a blog engine found at www.blosxom.com. It is hideously simple and hideously
-written.
-
-This module aims to replace the blosxom CGI script with a module that can incidentally
-be run as a CGI script without too much alteration. It should be backwardly compatible
-with the original blosxom script, meaning that your plugins should work correctly. That
-is to say that the same variables should be available at the same times, and the 
-functions you register will be called at the same or equivalent parts of the processing.
-
-Hopefully some improvements will be made on the original script. Although it boasts a
-low line count, this is at the unfortunate expense of legibility, replacing it with the
-line noise Perl is so famous for. This module spreads out the original script's
-processing and puts it into neat containers where it can be seen and fixed.
-
 =cut
 
 our $VERSION = '0.08';
@@ -42,10 +26,93 @@ our $VERSION = '0.08';
 
     use Blog::Blosxom;
 
+    ...
+
     my $blog = Blog::Blosxom->new(%params);
-    $blog->run();
-    ## OR
-    Blog::Blosxom->run(%params)
+    $blog->run($path, $flavour);
+
+A path comes in from somewhere - usually an HTTP request. This is applied to the
+blog directory. A configurable file extension is added to the path and if it matches
+a file that file is served as the matched entry. If the path matches a directory,
+all entries in that directory and in subdirectories are served. If the path looks
+like a date, all posts that match that date are served. A string is returned, which
+is usually printed back to CGI. The string is the matched entries, served in the
+specified output format, or flavour. The flavour is determined by the file extension
+on the incoming path, or a GET parameter, or a configured default.
+
+=head1 DESCRIPTION
+
+Blosxom is a blog engine. It is a rewrite of a CGI script found at www.blosxom.com.
+Blosxom uses the filesystem as the database for blog entries. Blosxom's run() 
+method takes two parameters: the path and the flavour.
+
+The CGI script that ships with the module is an example of how to use this module
+to reproduce the behaviour of the original Blosxom script, but the idea here is 
+that it is up to you how to get this data.
+
+Every file that ends in a configurable file extension and is placed somewhere within
+the blog root directory is, in the default situation, served up on a big page, in
+date order, having been processed and turned into blog posts. The set of files chosen
+for display is pared down by specifying a path to limit the set to only entries under
+that path, the narrowest possible filter of course being when the path actually
+matches a single blog entry.
+
+Alternatively, the path may be a date in the format YYYY[/MM[/DD]], with the brackets
+denoting an optional section. This will be used to filter the posts by date instead
+of by location. All posts under the blog root are candidates for being returned. A
+TODO is to concatenate a date-style filter and a directory-style filter.
+
+The module is designed to be extensible. That is, there are several methods in it
+that are designed to be overridden by subclasses to extend the functionality of
+Blog::Blosxom. You can see the L<PLUGINS> section below for details on these, and
+examples.
+
+=head1 TERMS
+
+=head2 entry
+
+Entry is used to mean both the individual article (its title, content and any 
+metadata) and the file that contains that data. The entry is a filename with a
+customisable file extension. The file name and file extension have two differnent
+purposes.
+
+The file extension is used to decide what is a blog post and what isn't. Files that
+have the defined file extension will be found by the blog engine and displayed, so
+long as they are within the filter.
+
+The entry's filename is used to find a single entry. The path you provide to 
+C<run()> is given the file extension defined for blog entries and then applied to the
+root directory. If this is a file, that is served. If not, it is tested without the
+file extension to be a directory. If it is a directory, all files ending with this
+extension and within that directory are served.
+
+=head2 story
+
+The story is the formatted version of an entry. The file story.$flavour is used to
+insert the various parts of the blog entry into a template, which is then concatenated
+to a string which is itself returned from the C<run> method. See below for what I
+mean by $flavour.
+
+=head2 flavour
+
+The flavour of the blog is simply the format in which the blog entry is served as a
+story. The flavour is determined by you. The CGI script takes the file extension
+from the request URI, or the C<flav> GET parameter.
+
+If neither is provided, the default flavour is used. This is passed as a parameter
+to C<new> and defaults to C<html>.
+
+=head2 component
+
+A component is one of the five (currently) sections of the page: head, foot, story,
+date and content-type. The story and date components appear zero-to-many times on
+each page and the other three appear exactly once.
+
+=head2 template
+
+A template is a flavoured component. It is defined as a file in the blog root whose
+filename is the component and whose extension is the flavour. E.g. C<head.html> is
+the HTML-flavoured head component's template.
 
 =head1 METHODS
 
@@ -91,7 +158,7 @@ datadir itself, up to n, which will look n-1 subdirectories down.
 
 =item num_entries
 
-This is the number of entries to display on the home page. By default this is 40.
+This is the maximum number of stories to display when multiple are found in the filter.
 
 =item file_extension
 
@@ -102,15 +169,14 @@ file extension.
 =item default_flavour
 
 The flavour simply determines which set of templates to use to draw the blog. This 
-defines which flavour to use by default. Vanilla blosxom has HTML and RSS flavours.
+defines which flavour to use by default. Vanilla blosxom has HTML and RSS flavours,
+of which RSS sucks really hard so really only HTML is available by default.
 
 =item show_future_entries
 
-Original Blosxom has this, which is a boolean value that determines whether or not to
-show entries dated in the future. However, since Blosxom uses the filesystem's metadata
-to determine the date of the entry, and a future modification date is an error in ext
-filesystems, this is probably not going to do anything useful. However, it will be
-available in your plugins and templates if you need it.
+This is a bit of a strange one, since by default, having a future date on an entry
+is a filesystem error, but if you want to override how the date of a template is
+defined, this will be helpful to you.
 
 =item plugin_dir
 
@@ -127,7 +193,8 @@ need to be writable. Defaults to plugin_dir/state if you specify a plugin_dir.
 
 Blosxom can publish your files statically, which means you run the script and it creates
 HTML files (for example) for each of your entries, instead of loading them dynamically.
-This defines where those files should go.
+This defines where those files should go. I haven't actually implemented this because I
+don't really want to.
 
 =item static_password
 
@@ -288,9 +355,14 @@ sub run {
 
 =head2 template($path, $component, $flavour)
 
-Returns a chunk of markup for the requested component in the requested flavour for the 
-requested path. The path in this case will be the one entered in the URL, but this is 
-applied to the datadir in order to find the actual file anyway.
+Returns a chunk of markup for the requested component in the requested flavour 
+for the requested path. The path will be the one given to C<run>. 
+
+By default the template file chosen is the file C<$component.$flavour> within 
+the C<$path> provided, and if not found, upwards from there to the blog root.
+
+The templates used are I<content_type>, I<head>, I<story>, I<date> and I<foot>,
+so the HTML template for the head would be C<head.html>.
 
 =cut
 
@@ -331,9 +403,11 @@ Given a path, find the entries that should be returned. This may be overridden
 by a plugin defining the function "entries", or this "entries_for_path" function.
 They are synonymous. See L<PLUGINS> for information on overriding this method.
 
-This implements two behaviours. If the path requested is a real path then it is
+The path will not include C<datadir>.
+
+It implements two behaviours. If the path requested is a real path then it is
 searched for all blog entries, honouring the depth parameter that limits how far
-below the data_dir we should look for blog entries.
+below the C<datadir> we should look for blog entries.
 
 If it is not then it is expected to be a date, being in 1, 2 or 3 parts, in one
 true date ISO format. This version will return all entries filtered by this date
@@ -803,6 +877,151 @@ sub _check_plugins {
     }
 }
 
+=head1 USAGE
+
+=head2 Quick start
+
+To quick start, first you need to create a Blosxom object. You have to provide
+three parameters to the C<new> method:
+
+    datadir
+    blog_title
+    blog_description
+
+The latter is likely to be dropped as a requirement soon.
+
+Then you need to find some way of collecting a path and a flavour from the user.
+The original script used the URL provided by the web server. You provide these
+to the C<run> method.
+
+    use Blog::Blosxom;
+    use CGI qw(standard);
+
+    my $blog = Blog::Blosxom->new(
+        datadir => '/var/www/blosxom/entries',
+        blog_title => 'Descriptive blog title.',
+        blog_description => 'Descriptive blog description.',
+    );
+
+    my $path = path_info() || param('path');
+    my ($flavour) = $path =~ s/(\.\w+)$// || param('flav');
+
+    print header,
+          $blog->run($path, $flavour);
+
+The above is a complete CGI script that will run your blog. Note that C<header>
+is a CGI function. Don't print that if you're not using CGI!
+
+Now that we know how to run Blosxom we can look at how to make entries.
+
+=head2 Entries
+
+To create an entry, create a plaintext file in your C<datadir> with the .txt
+extension. The first line of this file is the title of the post and the rest
+is the body.
+
+This post will be displayed if it is somewhere under the C<$path> you provided
+to C<run>, unless it is the 41st such file, because by default only 40 are
+displayed at once.
+
+The C<txt> part of all this is configurable in C<new>.
+
+=head2 Flavour
+
+The flavour that you provide determines which set of templates are used to 
+compose the output blog.
+
+You may be wondering about the fact that the blog entry ends with .txt, but in
+the CGI script we have used the extension to determine the flavour. The file 
+extension is ignored when mapping the path to the file system, so your path
+could feasibly match a single entry, which will of course be served on its own.
+
+The template to be chosen is a file whose file extension is the current flavour
+and whose file name is the template in question. Have a look at the docs for the
+C<template> function.
+
+Writing these templates is the primary way you make your blog entries show up
+as decent stories. The other way is when you override the C<entry_data> method
+and have the content of your entries moulded into some slightly better markup.
+
+=head2 More information
+
+The best source of information on this is the documentation for the methods
+themselves. Therefore, we provide the execution order so you can see exactly
+what is going on and figure stuff out that way.
+
+=over
+
+=item new
+
+Blosxom is an object-oriented thing now. This is so that you can subclass it to
+override any or all of the default functionality, which is kind of the point
+of Blosxom in the first place.
+
+=item run
+
+The original script found the path and flavour for you but this one lets you
+decide where they should come from, so you can integrate them into other
+applications if you wish.
+
+=item entries_for_path
+
+The next thing that happens is the path is searched for all entries, and this
+function simply returns them all. This function returns an array of each entry's
+filename and a bit of extra data alongside.
+
+=item date_of_post
+
+C<entries_for_path> calls C<date_of_post> to get that little bit of extra data.
+
+=item filter
+
+Then the entries list is filtered. This function is empty by default, intended
+to be overridden by plugins or subclasses.
+
+=item sort
+
+The remaining list is sorted. This is done by date by default, the date being
+ascertained during C<entries_for_path>.
+
+=item entry_data
+
+This is one of the more powerful functions to reimplement. It returns as much
+data about the provided entry as is necessary for your use of Blosxom. The
+required return data are defined in the docs for this function; see also the
+PLUGINS section.
+
+This is called for each entry that remains after C<filter> is done and C<sort>
+has ordered them.
+
+=item template
+
+This is called to get the data to give to C<interpolate>. It simply returns the
+contents of the template file. 
+
+=item interpolate
+
+This is the second of the more powerful functions. In this function, the raw
+templates have their variables replaced with their values. How that works is
+documented in the method's own documentation!
+
+Each entry's data is given to its template through this function; occasionally
+while this is happening the date template is also given its data too.
+
+=item head_data
+
+This gets data to give to C<interpolate> for the C<head> template.
+
+=item foot_data
+
+This gets data to give to C<interpolate> for the C<foot> template.
+
+=back
+
+The interpolated templates are aggregated into an array, onto which the head
+and foot templates are added at the end, allowing info about the whole page to
+be available to both the top and bottom of the page.
+
 =head1 PLUGINS
 
 Writing plugins for this new version of Blosxom is easy. If you know exactly
@@ -849,8 +1068,7 @@ would be C<myplugin>.
 
 Every single hook in the plugin will be passed the I<Blosxom> object as the
 first argument, effectively running the function as a method on the object
-itself. This $self will therefore not be mentioned in the following 
-explanations; only any extra parameters will be described.
+itself. This is shown as the C<$self> argument.
 
 In all cases, the first plugin that defines a hook is the one that gets to do
 it. For this reason you may find that you want to use the method above to
@@ -869,7 +1087,7 @@ wildly alter the output, such as adding extra information to the same set of
 data. Obviously this is not true of C<start> and C<skip>, since these are not
 methods on the class in the first place.
 
-=head3 start
+=head3 start ($self)
 
 The C<start> subroutine is required in your module and will return either a
 true or a false value to decide whether the plugin should be used.
@@ -880,10 +1098,15 @@ You can use the values on the Blosxom object if you need to make a decision.
       return shift->{static_mode}; # Only active in static mode
   }
 
-=head3 template ($path, $comp, $flavour)
+=head3 template ($self, $path, $comp, $flavour)
+    
+    $path:    path of request, filename removed
+    $comp:    component e.g. head, story
+    $flavour: quite obviously the flavour of the request
 
 This returns the template to use in the given path for the given component for
-the given flavour. The requested filename will not be part of the path.
+the given flavour. The requested filename will not be part of the path, if the
+requested path matched an individual entry.
 
 The default template procedure is to check the given path and all parent
 directories of that path, up to the blog root, for the file $comp.$flavour,
@@ -899,46 +1122,44 @@ themselves. That means that if your original plugin defined a new template for,
 e.g., the date.html in certain situations, this is where you should now return
 that magic HTML.
 
-=head3 entries_for_path ($path)
+=head3 entries_for_path ($self, $path)
+
+    $path: The path as provided to run()
 
 This returns an array of items. Each item is itself an arrayref, whose first
 entry is the filename and whose second entry is a hashref. The hashref is
-required to contain the 'date' key, which specifies the date of the file. That
-is, the function returns:
+required to contain the 'date' key, which specifies the date of the file. 
 
-    @(
-        [
-            filename,
-            {
-                date => [ year, month, day ],
-                ...
-            }
-        ],
-        ...
-    )
+That's pretty complicated. Here's some more info. When Blosxom is converting
+entries into stories it needs to know what entries exist under a given path, 
+and the date of each entry. It therefore needs an array of arrayrefs, each 
+arrayref representing one of the entries found under the given path, in the 
+format C<[$filename, $date]>.
 
-Obviously this is not real Perl syntax, but it is similar, and should get the
-point across. The arrayref may contain other things in the third and subsequent
-positions, and the hashref may contain other keys, but this much is required.
+However, since it is envisioned you might want to add more metadata about the
+entry, the C<date> part is a hashref, so you can add more stuff to it if you
+want to. So now the format is C<[$filename, { date => $date }]>.
 
-The filename returned is the path and filename of the entry file relative to
-the datadir. The input $path is not necessarily relative to anything, because
-it will be the path of the HTTP request. Thus, please note, it may contain the
+The filename returned is the I<path and filename> of the entry file, I<relative
+the datadir>. The input $path is not necessarily relative to anything, because
+it will be the path the user requested. Thus, please note, it may contain the
 year, month and day of the requested post(s) and not a path to any real file or
 directory at all.
 
 It is worth noting that you can override how Blosxom decides the date of the
-file by implementing the date_of_post method instead of this one.
+file by implementing the C<date_of_post> method instead of this one.
 
-=head3 date_of_post ($post)
+=head3 date_of_post ($self, $post)
 
-The post provided will be the filename and path to the post, relative to the
-root of the blog directory, C<< $self->{datadir} >>. You should return an
-arrayref where [0] is the 4-digit year, [1] is the 2-digit month, and [2] is
-the 2-digit day. This is not checked for validity but will probably cause 
-something to blow up somewhere if it is not a real date.
+    $post: path and filename relative to blog root
 
-=head3 filter (@entries)
+You should return an arrayref where [0] is the 4-digit year, [1] is the 2-digit
+month, and [2] is the 2-digit day. This is not checked for validity but will 
+probably cause something to blow up somewhere if it is not a real date.
+
+=head3 filter ($self, @entries)
+    
+    @entries: an array of all entries, exactly as returned by entries_for_path
 
 This function does nothing by default and is a hook by which you can 
 scrupulously filter out posts one way or another. You are given the output of
@@ -946,7 +1167,9 @@ the C<entries_for_path> method above, and you should return an array in exactly
 the same format, except having removed any entries you do not want to show up on
 the generated page.
 
-=head3 sort (@entries)
+=head3 sort ($self, @entries)
+
+    @entries: an array of all entries, exactly as returned by entries_for_path
 
 You can override the default sorting mechanism, which is by date by default,
 by implementing this method. It is advisable to empty your date template if
@@ -964,7 +1187,7 @@ actually output. That is, it will find all the entries and pull in the templates
 but not do anything with them if any active plugin makes this function return 
 true. This is useful if, e.g., your plugin issues a redirect header.
 
-=head3 interpolate ($template, $extra_data)
+=head3 interpolate ($self, $template, $extra_data)
 
 This is where you can override the default way in which the variables are
 interpolated into the template.
@@ -1041,44 +1264,26 @@ to think about in the future.
 Static rendering is not yet implemented. Frankly I don't think I can be 
 bothered.
 
+A comment system is common on many blogs and I think I will write a separate
+plugin to make this easy.
+
 =head1 BUGS
 
-Please report any bugs or feature requests to C<bug-blog-blosxom at rt.cpan.org>, or through
-the web interface at L<http://rt.cpan.org/NoAuth/ReportBug.html?Queue=Blog-Blosxom>.  I will be notified, and then you'll
-automatically be notified of progress on your bug as I make changes.
+Bug reports on github, please! http://github.com/Altreus/Blog-Blosxom/issues
 
-
-
+You can also get the latest version from here.
 
 =head1 SUPPORT
 
-You can find documentation for this module with the perldoc command.
+You are reading the only documentation for this module.
 
-    perldoc Blog::Blosxom
+You should check out the examples folder. If you don't know where that is, 
+either check $HOME/.cpan/build or browse/clone the Git repository
+http://github.com/Altreus/Blog-Blosxom
 
-
-You can also look for information at:
-
-=over 4
-
-=item * RT: CPAN's request tracker
-
-L<http://rt.cpan.org/NoAuth/Bugs.html?Dist=Blog-Blosxom>
-
-=item * AnnoCPAN: Annotated CPAN documentation
-
-L<http://annocpan.org/dist/Blog-Blosxom>
-
-=item * CPAN Ratings
-
-L<http://cpanratings.perl.org/d/Blog-Blosxom>
-
-=item * Search CPAN
-
-L<http://search.cpan.org/dist/Blog-Blosxom/>
-
-=back
-
+If you're brave you can see if I'm around in #perl on irc.freenode.com. Your
+use case will help me refine the module, since in its initial state it was
+merely a rewrite of the original script for my own sanity.
 
 =head1 ACKNOWLEDGEMENTS
 
@@ -1087,16 +1292,16 @@ to do much of the stuff it did.
 
 http://blosxom.com
 
+Thanks to f00li5h on that irc.freenode.com (and many others!) for being the 
+first person I mean cat other than me to use it and therefore have lots of 
+things to say about it.
+
 =head1 LICENSE AND COPYRIGHT
 
-Copyright 2010 Altreus.
-
-This program is free software; you can redistribute it and/or modify it
-under the terms of either: the GNU General Public License as published
-by the Free Software Foundation; or the Artistic License.
-
-See http://dev.perl.org/licenses/ for more information.
-
+This module is released under the X11/MIT licence, which is the one where you
+use it as you wish and don't blame me for it. I hope the author of the original
+script does not take this badly; if the author sees this and wishes me to 
+change the licence I am happy to do so.
 
 =cut
 
