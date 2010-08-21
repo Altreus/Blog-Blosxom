@@ -10,6 +10,8 @@ use File::Spec;
 use File::stat;
 use Time::localtime;
 
+use List::Util qw(min);
+
 =head1 NAME
 
 Blog::Blosxom - A module version of the apparently inactive blosxom.cgi
@@ -20,7 +22,7 @@ Version 0.01
 
 =cut
 
-our $VERSION = '0.08';
+our $VERSION = '0.09';
 
 =head1 SYNOPSIS
 
@@ -316,6 +318,8 @@ sub run {
     @entries = $self->filter(@entries);
     @entries = $self->sort(@entries);
 
+    @entries = @entries[0 .. min($#entries, $self->{num_entries}-1) ];
+
     $self->{entries} = [];
 
     # A special template. The user is going to need to know this, but not print it.
@@ -395,6 +399,8 @@ sub template {
     }
 
     $template ||= $self->{template}{$flavour}{$comp} || $self->{template}{error}{$comp};
+
+    return $template;
 }
 
 =head2 entries_for_path
@@ -671,11 +677,9 @@ sub interpolate {
 
     {
         no strict 'vars';
-        # I couldn't think of a better way. I don't think there are any blosxom::
-        # namespace vars that need to be exposed to templates, but other plugins
-        # may make some. Not that $1 becomes the var name without the $ on it so
-        # we can put it back if it doesn't exist.
-        $template =~ s/(?:\$(\w+(?:::\w+)?))/"defined \$$1 ? \$$1 : '\$$1'"/gee;
+        # Non-blosxom:: variables must be namespaced. I can't be bothered
+        # making it work with more than one :: in it just yet, sorry.
+        $template =~ s/\$(\w+::\w+)/"defined \$$1 ? \$$1 : '\$$1'"/gee;
     }
 
     return $template;
