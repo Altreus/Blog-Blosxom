@@ -16,4 +16,9 @@ WriteMakefile(
     },
     dist                => { COMPRESS => 'gzip -9f', SUFFIX => 'gz', },
     clean               => { FILES => 'Blog-Blosxom-*' },
+    META_MERGE          => {
+        resources => {
+            repository => 'https://github.com/Altreus/Blog-Blosxom',
+        },
+    },
 );
